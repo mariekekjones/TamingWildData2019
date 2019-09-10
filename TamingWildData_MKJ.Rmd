@@ -1,0 +1,719 @@
+---
+title: "Taming Wild Data"
+author: "Data Services @ HSL"
+date: "9/6/2019"
+output: 
+  html_document:
+    keep_md: true
+---
+
+# Motivation
+
+Data analysis involves a large amount of [janitorwork](http://www.nytimes.com/2014/08/18/technology/for-big-data-scientists-hurdle-to-insights-is-janitor-work.html) -- munging and cleaning data to facilitate downstream data analysis. In fact, data scientists say that around [80%](https://www.infoworld.com/article/3228245/data-science/the-80-20-data-science-dilemma.html) of their time is taken up by data cleaning tasks compared to just 20% for the actual analyses.
+
+Our goal will be to produce "tidy data" that we can then use to derive some insights. [Tidy data](https://vita.had.co.nz/papers/tidy-data.pdf) is defined as:
+1. Each variable forms a column.
+2. Each observation forms a row.
+3. Each type of observational unit forms a table.
+
+Transforming the data into tidy data will take different steps depending on the nature of the untidyness. Hadley Wickham, who works for RStudio, says "tidy datasets are all alike but every messy dataset is messy in its own way."
+
+This lesson demonstrates techniques for data cleaning and manipulation. We will make use of the **tidyr** package to clean the data. The **dplyr** package will help us effectively manipulate and conditionally compute summary statistics over subsets of data, while the **stringr** package will help us interact with string data. 
+
+> Note: This lesson assumes a basic familiarity with R and should not be your first exposure to R and RStudio
+
+# Overall goal
+
+Let's say that you are a tuberculosis researcher and you would like to know the effect of a country's gdp on its tuberculosis incidence. To do this, the goal today will be to merge a dataset with tuberculosis variables to a dataset with gdp. Along the way we will have to clean the datasets to make sure they match up properly.
+
+# Set-up
+
+1. Navigate to the [HSL website](data.hsl.virginia.edu) and download today's files under Workshops --> Workshop Materials --> Taming Wild Data
+
+2. Move those files to a folder somewhere you can find
+
+3. In RStudio, go to File --> New Project. Choose "Existing Directory" and Browse to the folder containing your workshop materials. This creates an instance of RStudio running in the project folder so that your scripts can find your data files.
+
+4. We need to load the readr, dplyr, tidyr, and stringr packages. All of these packages are contained in the tidyverse megapackage. Let's load those packages now - hopefully you have already installed them. If you get an error loading the package, try `install.packages("tidyverse")`.
+
+```{r}
+#install.packages("tidyverse")
+
+# Load packages
+library(tidyverse)
+```
+
+# Read in original datasets
+
+```{r}
+tb <- read_csv("tb.csv")
+gm1 <- read_csv("gm_messy1.csv")
+gm2 <- read_csv("gm_messy2.csv")
+```
+
+Now let's take a look at each one of these files
+```{r}
+tb
+gm1
+gm2
+
+# Let's spend a little time understanding what each dataset really looks like
+glimpse(tb)
+
+glimpse(gm1)
+
+glimpse(gm2)
+```
+
+# The pipe: **%>%**
+
+Today we are going to be building up pipelines of functions where each step changes the dataset in some way. We would like to connect functions together in a logical way rather than creating ugly nested code.
+
+The dplyr package imports functionality from the [magrittr](https://github.com/smbache/magrittr) package that lets you _pipe_ the output of one function to the input of another, so you can avoid nesting functions. It looks like this: **`%>%`**. Quick keyboard shortcut is `Command+Shift+M` (mac) or `Control+Shift+M` (pc). You don't have to load the magrittr package to use it since dplyr imports its functionality when you load the dplyr package. 
+
+```{r}
+# one function without the pipe
+tail(tb, 20)
+
+# one function with the pipe
+tb %>% 
+  tail(20)
+
+# two functions without the pipe
+unique(tail(tb, 20)$country)
+
+# two functions with the pipe
+tb %>% 
+  tail(20) %>%
+  distinct(country)
+```
+
+We can use this pipe operator to chain together operations rather than nesting functions together. Let's learn a few functions for data manipulation.
+
+# The dplyr package
+
+The [dplyr package](https://dplyr.tidyverse.org/) is an R package that makes data manipulation fast and easy.
+
+The dplyr package gives you a handful of useful functions for managing data. On their own they don't do anything that base R can't do, but the power lies in piping them together. The first three functions we will learn are arrange, filter, and select
+
+1. `arrange()` -- sorts the dataframe by the specified column(s) 
+2. `filter()` -- subsets dataframe for **rows** that meet logical criteria
+3. `select()` -- subsets dataframe for specified **columns**
+
+They all take a data frame or tibble as their input for the first argument, and they all return a data frame or tibble as output.
+
+## arrange()
+
+The `arrange()` function does what it sounds like. It takes a data frame or tbl and arranges (or sorts) by column(s) of interest. The first argument is the data, and subsequent arguments are columns to sort on. Use the `desc()` function to arrange by descending.
+
+Let's use arrange to see tb in order of incidence_100k
+
+```{r}
+tb %>%
+  arrange(incidence_100k)
+```
+
+What about by descending incidence so ones with high incidence are on top?
+
+```{r}
+tb %>%
+  arrange(desc(incidence_100k))
+```
+
+## filter()
+
+If you want to subset **rows** of the dataframe where some logical condition is true, use the `filter()` function. 
+
+1. The first argument is the data frame you want to filter, e.g. `filter(mydata, ...`.
+2. The second argument is a condition you must satisfy, e.g. `filter(mydata, variable1 == "levelA")`.
+
+- `==`: Equal to
+- `!=`: Not equal to
+- `>`, `>=`: Greater than, greater than or equal to
+- `<`, `<=`: Less than, less than or equal to
+
+If you want to satisfy *all* of multiple conditions, you can use the "and" operator, `&`. 
+
+The "or" operator `|` (the pipe character, usually shift-backslash) will return a subset that meet *any* of the conditions (but not multiple).
+
+For example, let's return rows where the who_region is Europe
+
+```{r}
+tb %>% 
+  filter(who_region == "EUR")
+```
+  
+Now let's see rows where TB incidence per 100k is greater than or equal to 750
+
+```{r}
+tb %>% 
+  filter(incidence_100k >= 750)
+```
+
+## select()
+
+Whereas the `filter()` function allows you to return only certain _rows_ matching a condition, the `select()` function returns only certain _columns_. The first argument is the data, and subsequent arguments are the columns you want.
+
+See only the country and year columns
+
+```{r}
+tb %>%
+  select(country, year)
+```
+
+See all except the mort_100k column
+
+```{r}
+tb %>%
+  select(-mort_100k)
+```
+
+Remove all columns containing "mort"
+
+```{r}
+tb %>%
+  select(-contains("mort"))
+```
+
+# dplyr in action
+
+Let's filter for where the incidence per 100k is greater than or equal to 750 then just select the country, year, and incidence columns
+
+```{r}
+tb %>% 
+  filter(incidence_100k >= 750) %>% 
+  select(country, year, incidence_100k)
+
+# see all the output
+tb %>% 
+  filter(incidence_100k >= 750) %>% 
+  select(country, year, incidence_100k) %>%
+  print(n = Inf)
+```
+
+Let's put the output above in order by descending incidence
+
+```{r}
+tb %>% 
+  filter(incidence_100k > 750) %>% 
+  select(country, year, incidence_100k) %>%
+  arrange(desc(incidence_100k)) %>%
+  print(n = Inf)
+```
+
+Using just these few functions we have already learned, we can gain quite a bit of insight into a dataset!
+
+# EXERCISE 1
+
+1. In 2007, which 10 countries had the highest incidence_100k? (*Hint: filter() then arrange(), then head()*)
+
+```{r}
+tb %>% 
+  filter(year == 2007) %>%
+  arrange(desc(incidence_100k)) %>%
+  head(10)
+```
+
+2. Begin with your answer to #1 and `select()` only the country and the incidence_100k columns.
+
+```{r}
+tb %>% 
+  filter(year == 2007) %>%
+  arrange(desc(incidence_100k)) %>%
+  head(10) %>%
+  select(country, incidence_100k)
+```
+
+3. Within the South East Asia who_region, which rows have incidence_100K > 500?
+
+```{r}
+tb %>% 
+  filter(who_region == "SEA" & incidence_100k > 300)
+```
+
+4. Start with your output in #3 and find out which distinct countries are meet these criteria (SEA region and incidence > 300)
+
+```{r}
+tb %>% 
+  filter(who_region == "SEA" & incidence_100k > 300) %>%
+  distinct(country)
+```
+
+# The tidyr package
+
+## separate()
+
+```{r}
+glimpse(gm1)
+```
+
+In looking at the output of the gm1 dataset, we have some work to do to tidy the data for analysis. 
+
+The main problem I see is that there are multiple pieces of data encoded into the column called `le_gdp`. Luckily, the 2 pieces of data are each separated neatly by `::`. Let's use the separate function from the tidyr package to create 2 new columns from the original `le_gdp` column.
+
+```{r}
+# take a look at the separate function
+?separate
+
+gm1 %>% 
+  separate(le_gdp, into = c("lifeExp", "gdpPerCap"), sep = "::")
+```
+
+If the separator was not as neat as this, you can input any [regular expression](https://en.wikipedia.org/wiki/Regular_expression) into the separator argument. We will do a bit more today with regular expressions, but also see Further Resources at the bottom of the script for more about regular expressions.
+
+Notice that our original variable `le_gdp` no longer appears. This change is good, but so far it is only in the console. The originial dataframe is still unchanged. 
+
+```{r}
+gm1
+```
+
+Let's keep the change created by the `separate()` function by saving our pipeline back into gm.
+
+```{r}
+gm1 <- gm1 %>% 
+  separate(le_gdp, into = c("lifeExp", "gdpPerCap"), sep = "::")
+```
+
+This is often the workflow we would recommend. Try a change in the console. Make sure the change is what you intended. Then save the change, either in to the original dataset or into a new object.
+
+## gather()
+
+The next problem we will tackle is reshaping a dataframe. 
+
+Notice in our gm2 data dataframe that we have several variables that seem to be encoding the same information across different years. 
+
+```{r}
+glimpse(gm2)
+head(gm2)
+```
+
+Columns year.1952 through year.2007 tell us the population for that country in each of the years. We will use `gather()` to change the dataframe from wide to long, making each of the years a different row. This will also help a lot when merging our `gm2` dataset together with the `tb` dataset which has a row for each country-year.
+
+After the dataframe, `gather()` needs 3 other arguments. The first two are very important, but take some getting used to. 
+
+- `key` is the new column you want to create that has the old dataframe column headers
+- `value` corresponds to the row entries from old dataframe that you want in a new column
+- The third argument is the vector of columns that we want to gather
+
+```{r}
+gm2 <- gm2 %>% 
+  gather(key = year, value = pop, year.1952:year.2007)
+```
+
+That change is good -- let's save it as gm2
+
+Let's clean up the resulting year column so that they are just the years.
+
+## mutate()
+
+`mutate()` will create a new variable or change an existing variable in place. In this case, we would like to modify the existing year column so that it just has the year rather than the "year." ahead of it.
+
+Just like the other dplyr functions, `mutate()` takes a dataframe as the first argument and then the name of the new variable followed by a function to create the new variable.
+
+To clean up strings, the stringr package has several excellent functions. Today, we'll use `str_replace()` to remove the "year." before the numeric year.
+
+`str_replace()` takes the regular expression to find followed by the replacement. I think of it like Find and Replace in Microsoft Word
+
+```{r}
+gm2 %>%
+  mutate(year = str_replace(year, "year.", ""))
+```
+
+There is still a slight problem with the year column. Can you spot it?
+
+Great, let's fix it using `mutate()`
+
+```{r}
+gm2 %>%
+  mutate(year = str_replace(year, "year.", "")) %>% 
+  mutate(year = as.numeric(year))
+
+# perfect! Let's save that change
+gm2 <- gm2 %>%
+  mutate(year = str_replace(year, "year.", "")) %>% 
+  mutate(year = as.numeric(year))
+```
+
+If we wanted to reshape a dataframe from long to wide, we would use `spread()`. Typically, this is more rare than `gather()`
+
+```{r}
+spread(gm2, year, pop)
+```
+
+# Clean up tb using select()
+
+Before we join some datasets together, let's get rid of columns on the tb dataframe we will no longer use.
+
+Let's remove anything starting with "mort", ending with "ratio", or containing "hiv"
+
+```{r}
+glimpse(tb)
+```
+
+The `starts_with()`, `ends_with()`, and `contains()` helper functions are a nice way to take care of similarly named variables
+
+```{r}
+tb %>% 
+  select(-starts_with("mort"), -ends_with("ratio"), -contains("hiv"))
+
+# save that change
+tb <- tb %>% 
+  select(-starts_with("mort"), -ends_with("ratio"), -contains("hiv"))
+```
+
+tb should now have 8 variables
+
+# EXERCISE 2
+
+1. On your own, remove continent from the gm2 dataset and save the change
+
+```{r}
+gm2 <- gm2 %>%
+  select(-continent)
+```
+
+
+
+gm2 should now have 3 variables
+
+2. Remove pop from the tb dataset and save that change
+
+```{r}
+tb <- tb %>% select(-pop)
+```
+
+tb should now have 7 variables
+
+# Break
+
+To make sure we all have the same datasets, in case something went wrong up above, let's upload the above datasets to be safe.
+
+```{r}
+gm1 <- read_csv("gm1_clean.csv")
+gm2  <- read_csv("gm2_clean.csv")
+tb  <- read_csv("tb_clean.csv")
+```
+
+# Joins
+
+There are several types of joins (merges) that we can use. The one you should use depends upon your specific needs.
+
+First let's look closely at which columns link the two datasets.
+
+```{r}
+head(tb)
+head(gm1)
+```
+
+Each row in tb AND gm is a country-year. These two variables uniquely identify each of the observations in both datasets. Thus, these are the variables we should join on.
+
+Do all the country names match?
+
+Let's see with an example. Let's find USA in each. The function we will use is `str_detect()` from the stringr package. We'll use `str_detect()` inside `filter()` to only return rows with that regular expression pattern.
+
+```{r}
+# in tb
+tb %>%
+  filter(str_detect(country, "United")) %>%
+  distinct(country) 
+# called United States of America
+
+# in gm
+gm1 %>%
+  filter(str_detect(country, "United"))  %>%
+  distinct(country)
+# called United States
+```
+
+## anti_join()
+
+How many more countries do not match? To find out, the function we'll use is anti_join which returns rows in the left dataframe that are not present in the right
+
+```{r}
+#countries in tb not in gm
+anti_join(tb, gm1, by = "country") %>% 
+  distinct(country) %>%
+  print(n = Inf)
+
+# countries in gm not in tb
+anti_join(gm1, tb, by = "country") %>% 
+  distinct(country) %>%
+  print(n = Inf)
+```
+
+Let's change country names in tb to match those in the gm datasets. Luckily, I have made a table for you with the original country names from tb followed by the countries' names in the gm dataset
+
+```{r}
+name_lookup <- read_csv("new_country_names.csv")
+
+name_lookup %>% print(n = 30)
+```
+
+## left_join()
+
+Now we want to merge tb with name_lookup to attach our preferred country names to the tb dataset before we merge on gm1 and gm2.
+
+- `left_join()`: return all rows from the left, and all columns from left and right. Rows in left with no match in right will have NA values in the new columns. If there are multiple matches between left and right, all combinations of the matches are returned.
+
+Let's start by looking at the help menu for `left_join()`
+
+```{r}
+?left_join
+```
+
+Pay special attention to the argument "by = " to learn how to join datasets where the names of the columns to join are different.
+
+```{r}
+left_join(tb, name_lookup, by = c("country" = "old_country")) %>% View()
+```
+
+Save that change.
+
+```{r}
+tb <- left_join(tb, name_lookup, by = c("country" = "old_country"))
+```
+
+Now take away the old country column and replace it with the new_country (but call new_country country)
+
+```{r}
+tb %>%
+  select(-country) %>%
+  select(country = new_country, everything()) %>% View()
+
+# save the change
+tb <- tb %>%
+  select(-country) %>%
+  select(country = new_country, everything())
+```
+
+Great! Now let's worry about the years. Years that match between tb and gm are 2002 and 2007. 
+
+# EXERCISE 3
+
+Let's just keep those rows belonging to 2002 or 2007. Write this code on your own and call the resulting dataset tb2000
+
+```{r}
+tb2000 <- filter(tb, year == 2002 | year == 2007)
+```
+
+## Other types of joins
+
+- `right_join()`: return all rows from the right, and all columns from left and right. Rows in right with no match in left will have NA values in the new columns. If there are multiple matches between left and right, all combinations of the matches are returned.
+
+- `inner_join()`: return all rows from left where there are matching values in right, and all columns from left and right. If there are multiple matches between left and right, all combination of the matches are returned.
+
+- `full_join()`: return all rows and all columns from both left and right. Where there are not matching values, returns NA for the one missing.
+
+### Left join
+
+Let's try a left join first, starting with tb2000 on the left and adding gm1 to it on the right
+
+Think about the join that we are about to do. How many columns do we expect? How many rows?
+
+```{r}
+left_join(tb2000, gm1, by = c("country", "year")) %>% View()
+```
+
+What if we had joined tb to gm1
+
+```{r}
+left_join(tb, gm1, by = c("country", "year")) %>% View()
+```
+
+### Right join
+
+A right join will keep all the rows in the right dataset. If we join tb to gm1, what are the dimensions we expect now?
+
+```{r}
+right_join(tb, gm1, by = c("country", "year"))
+```
+
+### Inner join
+
+An inner join keeps only rows that were in both datasets. How many columns do we expect? How many rows?
+
+```{r}
+inner_join(tb, gm1, by = c("country", "year"))
+```
+
+### Full join
+
+Full joins keep all rows from both the left and the right datasets. How many columns do we expect? How many rows?
+
+```{r}
+3850 + 1704
+full_join(tb, gm1, by = c("country", "year"))
+```
+
+Now that we understand how joins work, let's create a joined dataset that keeps just rows where we have data from tb and gm. What join should we use?
+
+```{r}
+tbgm <- inner_join(tb, gm1, by = c("country", "year"))
+
+View(tbgm)
+```
+
+Now to that dataframe, let's left_join the gm2 dataset. gm2 also has country-year as its observational unit. Great!
+
+```{r}
+joined <- left_join(tbgm, gm2, by = c("country", "year"))
+write_csv(joined, "joined_tbgm.csv")
+View(joined)
+```
+
+# Change column order with select()
+
+`select()` can also be used to change the order of columns in our dataframe
+
+```{r}
+joined %>% 
+  select(country, year, who_region, continent, pop, everything())
+
+# save the change
+joined <- joined %>% 
+  select(country, year, who_region, continent, pop, everything())
+```
+
+In the code above, note the use of the helper function `everything()` to select all the columns I have not called by name.
+
+# Derive Insights using dplyr
+
+Now that we have variables from gm and tb in the same place, we are ready to answer our question about how gdp impacts tb incidence
+
+In country-years with highest gdp, what is the median incidence?
+In country-years with lowest gdp, what is the median incidence?
+
+First let's see what the median incidence is for all the country-years together. To do that we'll use a new dplyr function `summarize()`
+
+### summarize()
+
+The `summarize()` function summarizes multiple values to a single value. `summarize()` differs from base r functions like `mean()` or `median()` in that it will return a dataframe rather than a single value.
+
+Notice that summarize takes a data frame and returns a data frame. In this case it's a 1x1 data frame with a single row and a single column.
+
+```{r}
+joined %>% 
+  summarize(median(incidence_100k))
+```
+
+The name of the column, by default is whatever the expression was used to summarize the data. This usually isn't pretty, and if we wanted to work with this resulting data frame later on, we'd want to name that returned value something easier to deal with.
+
+```{r}
+joined %>% 
+  summarize(medInc = median(incidence_100k))
+```
+
+# EXERCISE 4
+
+1. Use dplyr functions to find the median incidence_100k for the 20 countries with the highest gdpPerCap
+
+```{r}
+# 20 highest gdp
+joined %>%
+  arrange(desc(gdpPerCap)) %>%
+  head(20) %>%
+  summarize(medInc = median(incidence_100k))
+```
+
+2. Follow the same process for the 20 countries with the lowest gdp
+
+```{r}
+# 20 lowest gdp
+joined %>%
+  arrange(gdpPerCap) %>%
+  head(20) %>%
+  summarize(medInc = median(incidence_100k))
+```
+
+3. Does gdp seem to influence tb incidence_100k? Share your conclusions with a neighbor.
+
+------------------------------------
+
+Before we end, let's learn one more dplyr trick.
+
+### group_by()
+
+By itself `group_by()` does not do much. All this does is takes an existing data frame and converts it into a grouped data frame.
+
+```{r groupby}
+joined %>% 
+  group_by(who_region)
+```
+
+The real power comes in where `group_by()` and `summarize()` are used together. First, write the `group_by()` statement. Then pipe the result to a call to `summarize()`.
+
+Let's use this workflow to get the median incidence_100k for each who_region
+
+```{r}
+joined %>% 
+  group_by(who_region) %>% 
+  summarize(medInc = median(incidence_100k))
+```
+
+While we're at it, let's calculate the median gdpPerCap too
+
+```{r}
+joined %>% 
+  group_by(who_region) %>% 
+  summarize(medInc = median(incidence_100k),
+            medgdp = median(gdpPerCap))
+```
+
+Put the output from the above in order by increasing median gdp
+
+```{r}
+joined %>% 
+  group_by(who_region) %>% 
+  summarize(medInc = median(incidence_100k),
+            medgdp = median(gdpPerCap)) %>%
+  arrange(medgdp)
+```
+
+## EXERCISE 5
+
+1. Calculate a correlation coefficient between gdp and incidence for each continent in 2007. *Hint*: `filter()`, `group_by()`, `summarize()` using the function cor()
+
+```{r}
+joined %>%
+  filter(year == 2007) %>%
+  group_by(continent) %>%
+  summarize(cor = cor(gdpPerCap, incidence_100k))
+```
+
+2. In #1, there are interesting correlation coefficients for Africa and for Oceania. Let's investigate a little more for Africa. Within Africa and 2007, sort the dataset by gdp and then look through the incidence_100k. Use select() to limit your view to the variables of interest *Hint:* `filter()`, `arrange()`, `select()`
+
+```{r}
+joined %>% 
+  filter(continent == "Africa" & year == 2007) %>% 
+  arrange(gdpPerCap) %>%
+  select(country, gdpPerCap, incidence_100k)
+
+joined %>%
+  filter(country == "Algeria" & year == 2007) %>%
+  summarize(cor = cor(gdpPerCap, incidence_100k))
+```
+
+3. Investigate the r = -1 correlation we saw from Oceania *Hint:* `filter()`. r = -1 is very rare. Why did we get this correlation coefficient?
+
+```{r, echo=FALSE}
+joined %>% 
+  filter(continent == "Oceania" & year == 2007)
+```
+
+4. Do countries with low lifeExp also have high rates of tb? Look for this trend by who_region only in 2007 _Hint:_ 3 pipes: `filter`, `group_by`, `summarize`.
+
+```{r, echo=FALSE}
+joined %>% 
+  filter(year == 2007) %>% 
+  group_by(who_region) %>% 
+  summarize(cor= cor(lifeExp, incidence_100k))
+```
+
+# Further Resources
+
+1. The [**_R for Data Science_ book**](http://r4ds.had.co.nz) is a fabulous resource for learning to do data science in R.
+
+2. There are cheatsheets available on the [RStudio website](https://www.rstudio.com/resources/cheatsheets/) for **tidyr**, **dplyr**, and **stringr**, among others. They are excellent quick reference guides for what we learned today.
+
+3. Resources for Regular Expressions:
+For a nice cheatsheet for writing regular expressions in R, see a [Regex cheatsheet](http://www.cbs.dtu.dk/courses/27610/regular-expressions-cheat-sheet-v2.pdf). Jenny Bryan has created a nice website tutorial for learning to use [Regular Expressions in R](http://stat545.com/block022_regular-expression.html).
